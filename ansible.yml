@@ -1,0 +1,73 @@
+---
+- hosts: schedula-dev
+  vars_files: vars.yml
+  vars:
+   ansible_python_interpreter: /usr/bin/python3
+   dump_db: "schedula-prod"
+   prod_host: "schedula.cfq8ikoyqpvt.ap-south-1.rds.amazonaws.com"
+   dev_host: "schedula.cfq8ikoyqpvt.ap-south-1.rds.amazonaws.com"
+   project_root_dir: /srv/app-prod
+   dump_file_path: "/home/ubuntu/dump"
+   dump_file_name: "schedula-dump.sql"
+   prod_db_user: admin
+   dev_db_user: schedula_dev
+   restore_db: schedula_dev
+
+  tasks:
+  - name: Ensure python3-pymysql is present
+    become: true
+    apt: 
+      name: python3-pymysql
+      state: latest
+      
+
+  - name: Creates directory
+    become: true
+    file:
+     path: "{{ dump_file_path }}"
+     state: directory
+     owner: ubuntu
+     group: ubuntu
+
+  - name:  Delete {{ dump_file_name }}
+    become: true
+    file:
+     path: "{{ dump_file_path }}/{{ dump_file_name }}"
+     state: absent
+
+  - name: Take Dump
+    community.mysql.mysql_db:
+     name: "{{ dump_db }}"
+     state: dump
+     target: "{{ dump_file_path }}/{{ dump_file_name }}"
+     login_host: "{{ prod_host }}"
+     login_user: "{{ prod_db_user }}"
+     login_password: "{{ prod_pass }}"
+     ignore_tables: ["{{ dump_db }}.audit_trail_entry"]
+     dump_extra_args: "--set-gtid-purged=OFF"
+
+  - name: Create a new database
+    mysql_db:
+     name: "{{ restore_db }}"
+     state: present
+     login_host: "{{ dev_host }}"
+     login_user: "{{ dev_db_user }}"
+     login_password: "{{ dev_pass }}"
+
+  - name: Restore {{ dump_db }} to {{ restore_db }}
+    shell: "mysql -h {{ dev_host }} -u {{ dev_db_user }} --password={{ dev_pass }}  {{ restore_db }} < {{ dump_file_name }}"
+    args:
+     chdir: "{{ dump_file_path }}"
+
+
+  # - name: Change dbname in .env
+  #   replace:
+  #     path: "{{ project_root_dir }}/.env"
+  #     regexp: "com;port=3306;dbname=.*"
+  #     replace: "com;port=3306;dbname={{ restore_db }}"
+
+#   - name:  Delete {{ dump_file_name }}
+#     become: true
+#     file:
+#      path: "{{ dump_file_path }}/{{ dump_file_name }}"
+#      state: absent
